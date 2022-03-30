@@ -1,13 +1,21 @@
 package com.atharvakale.facerecognition;
 
-import android.Manifest;
+import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageAnalysis;
+import androidx.camera.core.ImageProxy;
+import androidx.camera.core.Preview;
+import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.camera.view.PreviewView;
+import androidx.core.content.ContextCompat;
+import androidx.lifecycle.LifecycleOwner;
+
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
-import android.content.DialogInterface;
-import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -22,48 +30,25 @@ import android.graphics.YuvImage;
 import android.media.Image;
 import android.os.Build;
 import android.os.Bundle;
-
-import androidx.annotation.NonNull;
-
-import androidx.annotation.RequiresApi;
-import androidx.appcompat.app.AlertDialog;
-import androidx.camera.core.CameraSelector;
-import androidx.camera.core.ImageAnalysis;
-import androidx.camera.core.ImageProxy;
-import androidx.camera.core.Preview;
-import androidx.camera.lifecycle.ProcessCameraProvider;
+import android.util.Base64;
+import android.util.Pair;
+import android.util.Size;
+import android.widget.ImageButton;
+import android.widget.ImageView;
+import android.widget.TextView;
 
 import com.atharvakale.facerecognition.database.AppDatabase;
+import com.atharvakale.facerecognition.database.entity.User;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
 import com.google.common.util.concurrent.ListenableFuture;
-
-
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.face.Face;
 import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
-
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.camera.view.PreviewView;
-import androidx.core.content.ContextCompat;
-import androidx.lifecycle.LifecycleOwner;
-
-import android.text.InputType;
-import android.util.Base64;
-import android.util.Pair;
-import android.util.Size;
-import android.view.View;
-
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ImageButton;
-import android.widget.ImageView;
-import android.widget.TextView;
-import android.widget.Toast;
 
 import org.tensorflow.lite.Interpreter;
 
@@ -76,7 +61,6 @@ import java.nio.MappedByteBuffer;
 import java.nio.ReadOnlyBufferException;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -84,40 +68,38 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-public class MainActivity extends AppCompatActivity {
-    protected FaceDetector detector;
-
-    protected ListenableFuture<ProcessCameraProvider> cameraProviderFuture;
-    protected PreviewView previewView;
-    protected ImageView face_preview;
-    protected Interpreter tfLite;
-    protected TextView reco_name,preview_info;
-    protected Button recognize,camera_switch;
-    protected ImageButton add_face;
-    protected CameraSelector cameraSelector;
-    protected boolean startAddFace=false,flipX=false, registeredEmbed=false, startRecogFace=false; //kondisi start = true adalah untuk scan langsung (realtime)
-    protected Context context=MainActivity.this;
-
-    protected int cam_face=CameraSelector.LENS_FACING_FRONT; //Default Front Camera
-    Button btnScan;
-    protected int[] intValues;
-    protected int inputSize=112;  //Input size for model
-    protected boolean isModelQuantized=false;
-    protected float[][] embeedings;
-    protected float IMAGE_MEAN = 128.0f;
-    protected float IMAGE_STD = 128.0f;
-    protected int OUTPUT_SIZE=192; //Output size of model
-
-    protected ProcessCameraProvider cameraProvider;
-    private static final int MY_CAMERA_REQUEST_CODE = 100;
-
-    protected String modelFile="mobile_face_net.tflite"; //model name
-
-    public SharedPreferences sharedPreferencesBedaBitmap, sharedPreferencesBeda1, sharedPreferencesBeda2;
-
+public class AttendanceActivity extends AppCompatActivity {
+    FaceDetector detector;
     private AppDatabase database;
 
-    private String dataEmbedFromDb, dataNameFromDb, dataAllFromDb;
+    private ListenableFuture<ProcessCameraProvider> cameraProviderFuture;
+    PreviewView previewViewAttendance;
+    ImageView face_preview;
+    Interpreter tfLite;
+    TextView tv_name, tvs_name;
+    ImageButton add_face;
+    CameraSelector cameraSelector;
+    boolean start=true,flipX=false; //kondisi start = true adalah untuk scan langsung (realtime)
+    Context context=AttendanceActivity.this;
+
+    int cam_face=CameraSelector.LENS_FACING_FRONT; //Default Front Camera
+
+    int[] intValues;
+    int inputSize=112;  //Input size for model
+    boolean isModelQuantized=false;
+    float[][] embeddings;
+    float IMAGE_MEAN = 128.0f;
+    float IMAGE_STD = 128.0f;
+    int OUTPUT_SIZE=192; //Output size of model
+    private static int SELECT_PICTURE = 1;
+
+    ProcessCameraProvider cameraProvider;
+    private static final int MY_CAMERA_REQUEST_CODE = 100;
+
+    String modelFile="mobile_face_net.tflite"; //model name
+
+    String bitmapConverted, namenya, facenya;
+
 
     private HashMap<String, SimilarityClassifier.Recognition> registered = new HashMap<>(); //saved Faces
     @RequiresApi(api = Build.VERSION_CODES.M)
@@ -125,97 +107,25 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-
+        setContentView(R.layout.activity_attendance);
         database = AppDatabase.getInstance(getApplicationContext());
-        face_preview =findViewById(R.id.imageView);
-        reco_name =findViewById(R.id.textView);
-        preview_info =findViewById(R.id.textView2);
-        add_face=findViewById(R.id.imageButton);
-        add_face.setVisibility(View.INVISIBLE);
-        btnScan = findViewById(R.id.scan_face);
 
-        face_preview.setVisibility(View.INVISIBLE);
-        recognize=findViewById(R.id.button3);
-        camera_switch=findViewById(R.id.button5);
+        tv_name =findViewById(R.id.tv_name);
+        tvs_name = findViewById(R.id.tvs_name);
 
-//        if(registeredEmbed){
-//            dataEmbedFromDb = database.userDao().getAll().get(0).muka;
-//        } else {
-//            dataEmbedFromDb = "Embed belum tersimpan";
-//        }
+        namenya = database.userDao().getAll().fullName;
+        facenya = database.userDao().getAll().muka;
 
-        preview_info.setText("\n        Recognized Face:");
+        SimilarityClassifier.Recognition result = new SimilarityClassifier.Recognition(
+                "0", "", -1f);
+        result.setExtra(convertStringToFloat2(facenya));
 
-        btnScan.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                startActivity(new Intent(MainActivity.this, AttendanceActivity.class));
-            }
-        });
-
-        //Camera Permission
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.CAMERA}, MY_CAMERA_REQUEST_CODE);
-        }
-
-        camera_switch.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (cam_face==CameraSelector.LENS_FACING_BACK) {
-                    cam_face = CameraSelector.LENS_FACING_FRONT;
-                    flipX=true;
-                }
-                else {
-                    cam_face = CameraSelector.LENS_FACING_BACK;
-                    flipX=false;
-                }
-                cameraProvider.unbindAll();
-                cameraBind();
-            }
-        });
-
-        add_face.setOnClickListener((new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                startRecogFace = true;
-                addFace();
-            }
-        }));
-
-        recognize.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if(recognize.getText().toString().equals("Recognize"))
-                {
-                    startAddFace=false;
-                    startRecogFace=true;
-                    recognize.setText("Add Face");
-                    add_face.setVisibility(View.INVISIBLE);
-                    reco_name.setVisibility(View.VISIBLE);
-                    face_preview.setVisibility(View.INVISIBLE);
-                    preview_info.setText("\n    Recognized Face:");
-                }
-                else
-                {
-                    startAddFace = true;
-                    startRecogFace = true;
-                    recognize.setText("Recognize");
-                    reco_name.setVisibility(View.INVISIBLE);
-                    add_face.setVisibility(View.VISIBLE); //button add face second
-                    face_preview.setVisibility(View.VISIBLE); //preview face
-//                    preview_info.setText("1.Bring Face in view of Camera.\n\n2.Your Face preview will appear here.\n\n3.Click Add button to save face.");
-
-
-                }
-
-            }
-        });
+        registered.put(namenya, result);
 
         //Load model
-        System.out.println("jalankan load model MainAct");
+        System.out.println("jalankan load model AttAct");
         try {
-            tfLite=new Interpreter(loadModelFile(MainActivity.this,modelFile));
+            tfLite=new Interpreter(loadModelFile(AttendanceActivity.this,modelFile));
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -227,18 +137,35 @@ public class MainActivity extends AppCompatActivity {
         detector = FaceDetection.getClient(highAccuracyOpts);
 
         cameraBind();
+
+//        System.out.println("jalankan result att="+embeddings.toString());
     }
 
-    //permission camera(hanya 1x)
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == MY_CAMERA_REQUEST_CODE) {
-            if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(this, "camera permission granted", Toast.LENGTH_LONG).show();
-            } else {
-                Toast.makeText(this, "camera permission denied", Toast.LENGTH_LONG).show();
+    private float[][] convertStringToFloat2(String facenya2){
+        String[] rowWithoutSplit = facenya2.replace("[","").split("]");
+        int width = rowWithoutSplit.length;
+        String cells[] = rowWithoutSplit[0].split(",");
+        int height = cells.length;
+        float[][] output = new float[width][height];
+
+        for (int i=0; i<width; i++) {
+            String cells2[] = rowWithoutSplit[i].split(",");
+            for(int j=0; j<height; j++) {
+                output[i][j] = Float.parseFloat(cells2[j]);
             }
+        }
+
+        return output;
+    }
+
+    public Bitmap StringToBitMap(String encodedString){
+        try {
+            byte [] encodeByte= Base64.decode(encodedString,Base64.DEFAULT);
+            Bitmap bitmap=BitmapFactory.decodeByteArray(encodeByte, 0, encodeByte.length);
+            return bitmap;
+        } catch(Exception e) {
+            e.getMessage();
+            return null;
         }
     }
 
@@ -253,10 +180,10 @@ public class MainActivity extends AppCompatActivity {
     }
     private void cameraBind()
     {
-        System.out.println("Jalankan method cameraBind");
+        System.out.println("Jalankan method cameraBind AttAct");
         cameraProviderFuture = ProcessCameraProvider.getInstance(this);
 
-        previewView=findViewById(R.id.previewView);
+        previewViewAttendance=findViewById(R.id.previewViewAttendance);
         cameraProviderFuture.addListener(() -> {
             try {
                 cameraProvider = cameraProviderFuture.get();
@@ -269,14 +196,14 @@ public class MainActivity extends AppCompatActivity {
         }, ContextCompat.getMainExecutor(this));
     }
     void bindPreview(@NonNull ProcessCameraProvider cameraProvider) {
-        System.out.println("Jalankan method bindPreview");
+        System.out.println("Jalankan method bindPreview AttAct");
         Preview preview = new Preview.Builder().build();
 
         cameraSelector = new CameraSelector.Builder()
                 .requireLensFacing(cam_face)
                 .build();
 
-        preview.setSurfaceProvider(previewView.getSurfaceProvider());
+        preview.setSurfaceProvider(previewViewAttendance.getSurfaceProvider());
         ImageAnalysis imageAnalysis =
                 new ImageAnalysis.Builder()
                         .setTargetResolution(new Size(640, 480))
@@ -302,6 +229,8 @@ public class MainActivity extends AppCompatActivity {
 
                 System.out.println("ANALYSIS");
 
+
+
                 //Process acquired image to detect faces
                 Task<List<Face>> result =
                         detector.process(image)
@@ -309,22 +238,12 @@ public class MainActivity extends AppCompatActivity {
                                         new OnSuccessListener<List<Face>>() {
                                             @Override
                                             public void onSuccess(List<Face> faces) {
-                                                //faces adalah variable untuk face detection
+                                                System.out.println("jalankan faces Att = "+faces);
+
                                                 if(faces.size()!=0) {
-
-                                                    if(registeredEmbed){
-//                                                        dataEmbedFromDb = database.userDao().getAll().get(0).muka;
-//                                                        dataNameFromDb = database.userDao().getAll().get(0).fullName;
-                                                        dataAllFromDb = database.userDao().getAll().muka;
-                                                    } else {
-                                                        dataEmbedFromDb = "Embed waiting registered";
-                                                        dataNameFromDb = "Name waiting registered";
-                                                    }
-
-                                                    System.out.print("embed tersave all="+dataAllFromDb);
-
-                                                    System.out.println("jalankan faces Main = "+faces);
                                                     Face face = faces.get(0); //Get first face from detected faces
+                                                    System.out.println("facenya=");
+                                                    System.out.println(face);
 
                                                     //mediaImage to Bitmap
                                                     Bitmap frame_bmp = toBitmap(mediaImage);
@@ -342,19 +261,10 @@ public class MainActivity extends AppCompatActivity {
 
                                                     if(flipX)
                                                         cropped_face = rotateBitmap(cropped_face, 0, flipX, false);
-
                                                     //Scale the acquired Face to 112*112 which is required input for model
                                                     Bitmap scaled = getResizedBitmap(cropped_face, 112, 112);
 
-//
-
-//                                                    String scaledToConvert = BitMapToString(scaled);
-//                                                    database.userDao().insertBitmap(scaledToConvert);
-//
-//                                                    String scaledSaved = database.userDao().getAll().get(0).bitmap;
-//                                                    Bitmap scaledConvertAfterSaved = StringToBitMap(scaledSaved);
-
-                                                    if(startRecogFace)
+                                                    if(start)
                                                         recognizeImage(scaled); //Send scaled bitmap to create face embeddings.
                                                     System.out.println(boundingBox);
                                                     try {
@@ -365,14 +275,12 @@ public class MainActivity extends AppCompatActivity {
                                                 }
                                                 else
                                                 {
+                                                    System.out.println("faces = 0");
                                                     if(registered.isEmpty())
-                                                        reco_name.setText("Add Face");
-                                                    else {
-                                                        reco_name.setText("No Face Detected!");
-                                                    }
-
+                                                        tv_name.setText("Tambah Wajah terlebih dahulu");
+                                                    else
+                                                        tv_name.setText("Wajah tidak terdeteksi!");
                                                 }
-
                                             }
                                         })
                                 .addOnFailureListener(
@@ -401,31 +309,8 @@ public class MainActivity extends AppCompatActivity {
 
 
     }
-
-    public String BitMapToString(Bitmap bitmap) {
-        ByteArrayOutputStream baos=new  ByteArrayOutputStream();
-        bitmap.compress(Bitmap.CompressFormat.PNG,100, baos);
-        byte [] b=baos.toByteArray();
-        String temp= Base64.encodeToString(b, Base64.DEFAULT);
-        return temp;
-    }
-
-    public Bitmap StringToBitMap(String encodedString){
-        try {
-            byte [] encodeByte= Base64.decode(encodedString,Base64.DEFAULT);
-            Bitmap bitmap=BitmapFactory.decodeByteArray(encodeByte, 0, encodeByte.length);
-            return bitmap;
-        } catch(Exception e) {
-            e.getMessage();
-            return null;
-        }
-    }
-
     public void recognizeImage(final Bitmap bitmap) {
-        // set Face to Preview
-        face_preview.setImageBitmap(bitmap);
-
-        //Create ByteBuffer to store normalized image
+        System.out.print("jalankan method recognizeImage AttAct");
 
         ByteBuffer imgData = ByteBuffer.allocateDirect(1 * inputSize * inputSize * 3 * 4);
 
@@ -459,11 +344,14 @@ public class MainActivity extends AppCompatActivity {
 
         Map<Integer, Object> outputMap = new HashMap<>();
 
-        embeedings = new float[1][OUTPUT_SIZE]; //output of model will be stored in this variable
-        System.out.println("conv embed di recognizeImage="+Arrays.deepToString(embeedings));
-        outputMap.put(0, embeedings);
+
+        embeddings = new float[1][OUTPUT_SIZE]; //output of model will be stored in this variable
+
+        outputMap.put(0, embeddings);
 
         tfLite.runForMultipleInputsOutputs(inputArray, outputMap); //Run model
+
+
 
         float distance = Float.MAX_VALUE;
         String id = "0";
@@ -472,24 +360,23 @@ public class MainActivity extends AppCompatActivity {
         //Compare new face with saved Faces.
         if (registered.size() > 0) {
 
-            final Pair<String, Float> nearest = findNearest(embeedings[0]);//Find closest matching face
-            System.out.print("anu embed banding=");
-            System.out.println(Arrays.deepToString(new float[][]{embeedings[0]}));
+            final Pair<String, Float> nearest = findNearest(embeddings[0]);//Find closest matching face
+
             if (nearest != null) {
 
                 final String name = nearest.first;
-//                label = name;
+                label = name;
                 distance = nearest.second;
                 if(distance<1.000f) //If distance between Closest found face is more than 1.000 ,then output UNKNOWN face.
-                    reco_name.setText(name);
+                    tv_name.setText(name);
                 else
-                    reco_name.setText("Unknown");
+                    tv_name.setText("Wajah tidak dikenal");
                 System.out.println("nearest: " + name + " - distance: " + distance);
+            } else {
+                System.out.println("nearest = null");
             }
         }
     }
-
-
     //Compare Faces by distance between face embeddings
     private Pair<String, Float> findNearest(float[] emb) {
 
@@ -498,8 +385,6 @@ public class MainActivity extends AppCompatActivity {
 
             final String name = entry.getKey();
             final float[] knownEmb = ((float[][]) entry.getValue().getExtra())[0];
-            System.out.print("anu embed pair=");
-            System.out.println(Arrays.toString(knownEmb));
 
             float distance = 0;
             for (int i = 0; i < emb.length; i++) {
@@ -550,7 +435,7 @@ public class MainActivity extends AppCompatActivity {
         return rotatedBitmap;
     }
     private static Bitmap getCropBitmapByCPU(Bitmap source, RectF cropRectF) {
-        System.out.println("jalankan method getCrop MainAct");
+        System.out.println("jalankan method getCrop AttAct");
         Bitmap resultBitmap = Bitmap.createBitmap((int) cropRectF.width(),
                 (int) cropRectF.height(), Bitmap.Config.ARGB_8888);
         Canvas cavas = new Canvas(resultBitmap);
@@ -561,6 +446,7 @@ public class MainActivity extends AppCompatActivity {
         cavas.drawRect(//from  w w  w. ja v  a  2s. c  om
                 new RectF(0, 0, cropRectF.width(), cropRectF.height()),
                 paint);
+
         Matrix matrix = new Matrix();
         matrix.postTranslate(-cropRectF.left, -cropRectF.top);
 
@@ -662,105 +548,4 @@ public class MainActivity extends AppCompatActivity {
 
         return nv21;
     }
-
-    private float[][] convertStringToFloat(String facenya) {
-        String[] strings = facenya.split("");
-        List<String> stringList = new ArrayList<>();
-        List<String[]> tempResult = new ArrayList<>();
-        for(String str : strings) {
-            if(str.endsWith(">")) {
-                str = str.substring(0, str.length() - 1);
-                if(str.endsWith(">")) {
-                    str = str.substring(0, str.length() - 1);
-                }
-                stringList.add(str);
-                tempResult.add(stringList.toArray(new String[stringList.size()]));
-                stringList = new ArrayList<>();
-            } else {
-                stringList.add(str);
-            }
-        }
-        float[][] originalArray = tempResult.toArray(new float[tempResult.size()][]);
-
-        return originalArray;
-    }
-
-    private float[][] convertStringToFloat2(String facenya2){
-        String[] rowWithoutSplit = facenya2.replace("[","").split("]");
-        int width = rowWithoutSplit.length;
-        String cells[] = rowWithoutSplit[0].split(",");
-        int height = cells.length;
-        float[][] output = new float[width][height];
-
-        for (int i=0; i<width; i++) {
-            String cells2[] = rowWithoutSplit[i].split(",");
-            for(int j=0; j<height; j++) {
-                output[i][j] = Float.parseFloat(cells2[j]);
-            }
-        }
-
-        return output;
-    }
-
-    //Step Registration Face :
-    private void addFace()
-    {
-        {
-            AlertDialog.Builder builder = new AlertDialog.Builder(context);
-            builder.setTitle("Enter Name");
-
-                // Set up the input
-            final EditText input = new EditText(context);
-
-            input.setInputType(InputType.TYPE_CLASS_TEXT );
-            builder.setView(input);
-
-
-                // Set up the buttons
-            builder.setPositiveButton("ADD", new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    //Create and Initialize new object with Face embeddings and Name.
-                    //membuat face id baru dengan nama objek result
-
-                    database.userDao().insertAll(input.getText().toString(),Arrays.deepToString(embeedings));
-                    System.out.println("anu embed kk sebelum="+Arrays.deepToString(embeedings));
-
-                    SimilarityClassifier.Recognition result = new SimilarityClassifier.Recognition(
-                            "0", "", -1f);
-                    dataAllFromDb = database.userDao().getAll().muka;
-                    System.out.println("anu embed kk setelah="+Arrays.deepToString(convertStringToFloat2(dataAllFromDb)));
-
-                    result.setExtra(convertStringToFloat2(dataAllFromDb));
-
-                    //menyimpan nama yang diinput dan object result dengan nama SharedPreferenced adalah registered
-                    registered.put( input.getText().toString(),result);
-
-
-                    System.out.println("embed convert="+Arrays.deepToString(embeedings));
-                    System.out.println("embed convert false="+embeedings.toString());
-
-                    database.userDao().insertEmbed(Arrays.deepToString(embeedings));
-                    database.userDao().insertName(input.getText().toString());
-
-
-                    registeredEmbed=true;
-                    startAddFace=false;
-                    startRecogFace=false;
-                }
-            });
-            builder.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    startAddFace=false;
-                    startRecogFace=false;
-                    dialog.cancel();
-                }
-            });
-
-            builder.show();
-        }
-    }
-
 }
-
